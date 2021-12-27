@@ -1,3 +1,5 @@
+const twitterBearerToken = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+
 var usersBlocked = 0,
     usersFound = 0,
     usersAlreadyBlocked = 0,
@@ -63,24 +65,21 @@ class MobileTwitter {
     _getCSRFCookie() {
         return getCookie(mobileTwitterCSRFCookieKey);
     }
-    _makeRequest(options) {
-        document.cookie = `${mobileTwitterCSRFCookieKey}=${this._getCSRFCookie()};`;
-        document.cookie = `auth_token=${getCookie('auth_token')};`;
-        return new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage({
-                ...options,
-                contentScriptQuery: "doRequest",
-                auth_token: getCookie('auth_token'),
-                CSRFCookie: this._getCSRFCookie()
-            }, ({success, response}) => {
-                if (success) {
-                    resolve(response);
-                }
-                else {
-                    reject(response);
-                }
-            });
-        });
+    _makeRequest(path, options) {
+        let headers = options.headers || {}
+        let url = new URL('https://twitter.com/i/api/1.1/' + path)
+        if (location.hostname === 'mobile.twitter.com') {
+            url.hostname = 'mobile.twitter.com'
+        }
+        headers['authorization'] = twitterBearerToken
+        headers['x-csrf-token'] = this._getCSRFCookie()
+        headers['x-twitter-active-user'] = 'yes'
+        headers['x-twitter-auth-type'] = 'OAuth2Session'
+        options.headers = headers
+        return fetch(url.toString(), {
+            ...options,
+            credentials: 'include',
+        }).then(response => response.json())
     }
     startAccountFinder() {
         finderRunning = true;
@@ -95,8 +94,7 @@ class MobileTwitter {
             const count = 5000;
             let url = `${requestType}/ids.json?screen_name=${profileUsername}&count=${count}&stringify_ids=true`
             if (cursor) url += `&cursor=${cursor}`
-            return this._makeRequest({
-                url: url,
+            return this._makeRequest(url, {
                 method: 'GET'
             }).then((response) => {
                 let jsonData = response;
@@ -120,8 +118,7 @@ class MobileTwitter {
                 }
                 chunks = chunks.map((element) => {
                     let url = 'users/lookup.json?include_entities=true&include_blocking=true&include_ext_has_nft_avatar=1'
-                    return this._makeRequest({
-                        url: url,
+                    return this._makeRequest(url, {
                         headers: {
                             'content-type': 'application/x-www-form-urlencoded'
                         },
@@ -215,8 +212,8 @@ class MobileTwitter {
         return ((usersBlocked >= usersFound - usersAlreadyBlocked) && !finderRunning);
     }
     _doBlock(user, reverse) {
-        return this._makeRequest({
-            url: `blocks/${reverse ? "destroy" : "create"}.json?user_id=${user.id}&skip_status=true&include_entities=false`,
+        let url = `blocks/${reverse ? "destroy" : "create"}.json?user_id=${user.id}&skip_status=true&include_entities=false`
+        return this._makeRequest(url, {
             method: 'POST'
         }).then((response) => {
             queuedStorage[user.name] = {
